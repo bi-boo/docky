@@ -390,6 +390,28 @@ final class WindowRegistry: ObservableObject {
         else { return false }
 
         guard let element = liveElement(for: window) else { return false }
+        // Enhanced UI animates AX frame changes. A following position write
+        // can then see the old, full-width frame and get clamped to its edge.
+        // Disable it only for this transaction and restore the app's setting.
+        let application = AXUIElementCreateApplication(window.processIdentifier)
+        let enhancedUIAttribute = "AXEnhancedUserInterface" as CFString
+        var enhancedUIValue: CFTypeRef?
+        let restoreEnhancedUI = AXUIElementCopyAttributeValue(application, enhancedUIAttribute, &enhancedUIValue) == .success
+            && (enhancedUIValue as? Bool) == true
+        if restoreEnhancedUI {
+            guard AXUIElementSetAttributeValue(application, enhancedUIAttribute, kCFBooleanFalse) == .success else { return false }
+        }
+        defer {
+            if restoreEnhancedUI {
+                AXUIElementSetAttributeValue(application, enhancedUIAttribute, kCFBooleanTrue)
+            }
+        }
+
+        // Shrink before moving so a maximized window can fit at its new origin.
+        // Moving first can be clamped to the screen edge, leaving the gap on
+        // the opposite side after the size change. Reapply the size afterward
+        // because the source screen can constrain a cross-display expansion.
+        AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sizeValue)
         let posResult = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, positionValue)
         let sizeResult = AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sizeValue)
         return posResult == .success && sizeResult == .success
