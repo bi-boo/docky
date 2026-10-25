@@ -27,6 +27,7 @@ import AppKit
 import ApplicationServices
 import Combine
 import ScreenCaptureKit
+import os
 
 private let axWindowNumberAttribute = "AXWindowNumber" as CFString
 private let axCloseAction = "AXClose" as CFString
@@ -106,6 +107,7 @@ struct AppWindow: Identifiable, Hashable {
 
 final class WindowRegistry: ObservableObject {
     static let shared = WindowRegistry()
+    private static let logger = Logger(subsystem: "gt.quintero.Docky", category: "WindowRegistry")
 
     /// Observed-order window list across all tracked apps. Order is stable:
     /// new windows are appended; updates land in place; removals leave a
@@ -396,14 +398,17 @@ final class WindowRegistry: ObservableObject {
         let application = AXUIElementCreateApplication(window.processIdentifier)
         let enhancedUIAttribute = "AXEnhancedUserInterface" as CFString
         var enhancedUIValue: CFTypeRef?
+        // If disabling fails, still resize (same as before this workaround)
+        // and leave the app's setting alone.
         let restoreEnhancedUI = AXUIElementCopyAttributeValue(application, enhancedUIAttribute, &enhancedUIValue) == .success
             && (enhancedUIValue as? Bool) == true
-        if restoreEnhancedUI {
-            guard AXUIElementSetAttributeValue(application, enhancedUIAttribute, kCFBooleanFalse) == .success else { return false }
-        }
+            && AXUIElementSetAttributeValue(application, enhancedUIAttribute, kCFBooleanFalse) == .success
         defer {
             if restoreEnhancedUI {
-                AXUIElementSetAttributeValue(application, enhancedUIAttribute, kCFBooleanTrue)
+                let result = AXUIElementSetAttributeValue(application, enhancedUIAttribute, kCFBooleanTrue)
+                if result != .success {
+                    Self.logger.error("Failed to restore AXEnhancedUserInterface for pid \(window.processIdentifier, privacy: .public): AXError \(result.rawValue, privacy: .public)")
+                }
             }
         }
 
